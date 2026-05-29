@@ -131,19 +131,25 @@ function onGlobalKeyDown ( event )
 
 async function setup ()
 {
-  // Boot order: layout -> assets -> session -> UI listeners.
+  // Bind UI before network work so overlays remain usable if /init is slow.
   setupLayout();
-  await preloadAssets();
   renderButtons();
   clearPaylineLabels();
   renderScreen( emptyScreen() );
   setSpinDisabled( true );
+  bindUiEvents();
+  setupAudio();
+  await preloadAssets();
   await initSession();
   renderBetOptions();
   renderPaytable();
   currentState = "BETTING";
   updateHud();
   setSpinDisabled( false );
+}
+
+function bindUiEvents ()
+{
   document.addEventListener( "keydown", onGlobalKeyDown );
   document.addEventListener( "visibilitychange", handleVisibilityChange );
   els.betSelect.addEventListener( "change", () => renderPaytable() );
@@ -158,7 +164,6 @@ async function setup ()
   els.buyBonusMinus.addEventListener( "click", () => stepBuyBonusBet( -1 ) );
   els.buyBonusPlus.addEventListener( "click", () => stepBuyBonusBet( 1 ) );
   els.confirmBuyBonus.addEventListener( "click", buyBonus );
-  setupAudio();
 }
 
 async function preloadAssets ()
@@ -205,6 +210,7 @@ function normalizeApiBaseUrl ( value )
 
   // Common deploy mistake: "https://https://..."
   url = url.replace( /^https?:\/\/https?:\/\//i, "https://" );
+  if ( !/^https?:\/\//i.test( url ) ) url = `https://${ url }`;
 
   // Remove trailing slash to keep fetch paths consistent.
   url = url.replace( /\/+$/, "" );
@@ -276,6 +282,7 @@ async function initSession ()
 async function spin ()
 {
   // Frontend never decides result: it requests /spin then animates returned grid.
+  if ( !canUseGameApi() ) return;
   if ( currentState === "WIN_PRESENTATION" )
   {
     queuedSpinAfterWin = true;
@@ -582,6 +589,11 @@ function renderButtons ()
 function renderPaytable ()
 {
   // Paytable is rendered with current selected bet so values are always real in EUR.
+  if ( !els.betSelect.value )
+  {
+    els.paytable.innerHTML = "";
+    return;
+  }
   const bet = getSelectedBet();
   els.paytable.innerHTML = "";
   const fragment = document.createDocumentFragment();
@@ -1001,8 +1013,17 @@ function setScatterTease ( active )
 
 function getSelectedBet ()
 {
+  if ( !els.betSelect.value ) throw gameUiError( "BET_NOT_READY", "Puntate non ancora caricate dal server." );
   const selected = JSON.parse( els.betSelect.value );
   return normalizeBet( selected );
+}
+
+function canUseGameApi ()
+{
+  if ( session && els.betSelect.value ) return true;
+  const err = gameUiError( "GAME_NOT_READY", "Sessione non ancora inizializzata. Controlla il backend Render e ricarica." );
+  showError( err );
+  return false;
 }
 
 function normalizeBet ( bet )
@@ -1190,6 +1211,7 @@ function getSpinTiming ()
 
 function decreaseBet ()
 {
+  if ( !els.betSelect.options.length ) return;
   els.betSelect.selectedIndex = Math.max( 0, els.betSelect.selectedIndex - 1 );
   renderPaytable();
   updateHud();
@@ -1197,6 +1219,7 @@ function decreaseBet ()
 
 function increaseBet ()
 {
+  if ( !els.betSelect.options.length ) return;
   els.betSelect.selectedIndex = Math.min( els.betSelect.options.length - 1, els.betSelect.selectedIndex + 1 );
   renderPaytable();
   updateHud();
@@ -1204,6 +1227,7 @@ function increaseBet ()
 
 function setMaxBet ()
 {
+  if ( !els.betSelect.options.length ) return;
   els.betSelect.selectedIndex = els.betSelect.options.length - 1;
   renderPaytable();
   updateHud();
@@ -1211,6 +1235,7 @@ function setMaxBet ()
 
 function openBuyBonus ()
 {
+  if ( !canUseGameApi() ) return;
   if ( currentState === "SPINNING" || currentState === "SPIN_REQUESTED" || freeSpinsRemaining > 0 ) return;
   buyBonusBetIndex = Math.max( 0, els.betSelect.selectedIndex );
   renderBuyBonusModal();
@@ -1237,6 +1262,7 @@ function renderBuyBonusModal ()
 
 async function buyBonus ()
 {
+  if ( !canUseGameApi() ) return;
   const bet = normalizeBet( JSON.parse( els.betSelect.options[ buyBonusBetIndex ].value ) );
   els.betSelect.selectedIndex = buyBonusBetIndex;
   renderPaytable();
@@ -1297,6 +1323,13 @@ function setRect ( element, rect )
   element.style.top = `${ rect.y }px`;
   element.style.width = `${ rect.w }px`;
   element.style.height = `${ rect.h }px`;
+}
+
+function gameUiError ( code, message )
+{
+  const error = new Error( message );
+  error.code = code;
+  return error;
 }
 
 function symbolX ( col )
