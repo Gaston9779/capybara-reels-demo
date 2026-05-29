@@ -207,6 +207,7 @@ function normalizeApiBaseUrl ( value )
   if ( typeof value !== "string" ) return null;
   let url = value.trim();
   if ( !url ) return null;
+  if ( url.startsWith( "/" ) ) return url.replace( /\/+$/, "" );
 
   // Common deploy mistake: "https://https://..."
   url = url.replace( /^https?:\/\/https?:\/\//i, "https://" );

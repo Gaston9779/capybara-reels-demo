@@ -95,7 +95,9 @@
     </div>
   </main>
   <script>
-    window.__GAME_API_URL__ = "https://capybara-reels-demo.onrender.com";
+    window.__GAME_API_URL__ = ["localhost", "127.0.0.1"].includes(window.location.hostname)
+      ? "http://localhost:3000"
+      : "/api";
   </script>
   <script type="module" src="./src/app.js"></script>
 </body>
