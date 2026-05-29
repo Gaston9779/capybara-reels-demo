@@ -1,0 +1,16 @@
+{
+  "name": "treasure-reels-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 5173",
+    "api": "tsc -p tsconfig.json --outDir dist --noEmit false && node dist/backend/src/api/server.js",
+    "simulate": "node src/simulate.js",
+    "simulate:backend": "tsc -p tsconfig.json --outDir dist --noEmit false && node -e \"import('./dist/backend/src/simulation/simulator.js').then(m=>console.log(JSON.stringify(m.runSimulation({spins:Number(process.argv[1]||100000)}),null,2)))\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

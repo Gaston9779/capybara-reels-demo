@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Treasure Reels - Play Money Demo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Bangers&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main class="game-shell">
+      <div class="stage-viewport" id="stageViewport">
+        <section class="game-stage" id="gameStage" aria-label="Treasure Reels slot machine">
+          <div class="asset-loader" id="assetLoader">
+            <strong>Loading</strong>
+            <span id="assetLoaderProgress">0%</span>
+          </div>
+          <img class="stage-image stage-background" src="./src/assets/background.png" alt="" />
+          <div class="reels-frame" id="reelsFrame">
+            <div class="scatter-tease-banner" id="scatterTeaseBanner" hidden>
+              <strong>2 Scatter</strong>
+              <span>Ancora uno per i Free Spins</span>
+            </div>
+            <div class="reels" id="reels"></div>
+          </div>
+          <svg class="payline-layer" id="paylineLayer" viewBox="0 0 1438 1024" aria-hidden="true"></svg>
+          <div class="payline-labels" id="paylineLabels" aria-hidden="true"></div>
+          <div class="win-celebration" id="winCelebration" hidden>
+            <div class="win-burst"></div>
+            <img id="winCelebrationImage" src="./src/assets/win.png" alt="" />
+            <strong id="winCelebrationAmount">0,00 €</strong>
+          </div>
+          <div class="bonus-intro" id="bonusIntro" hidden>
+            <img src="./src/assets/background-bonus.png" alt="" />
+            <button id="bonusIntroButton" type="button" aria-label="Prosegui con il bonus"></button>
+          </div>
+          <img class="stage-image stage-frame" src="./src/assets/reel-frame.png" alt="" />
+          <img class="stage-logo" src="./src/assets/logo.png" alt="Treasure Reels" />
+
+          <div class="stage-hud hud-balance">
+            <span>SALDO</span>
+            <strong id="balance">0</strong>
+          </div>
+          <div class="stage-hud hud-win">
+            <span>VINCITA</span>
+            <strong id="lastWin">0</strong>
+          </div>
+          <div class="stage-hud hud-status" id="bonusState">Base game</div>
+          <div class="stage-hud hud-state" id="roundState">IDLE</div>
+
+          <select class="bet-select" id="betSelect" aria-label="Puntata"></select>
+          <div class="stage-buttons" id="stageButtons"></div>
+          <section class="buy-bonus-modal" id="buyBonusModal" hidden>
+            <div class="buy-bonus-card">
+              <button class="buy-bonus-close" id="closeBuyBonus" type="button">Chiudi</button>
+              <h2>Bonus</h2>
+              <p>Acquisto bonus demo: 30x puntata.</p>
+              <div class="buy-bonus-stepper">
+                <button id="buyBonusMinus" type="button">-</button>
+                <strong id="buyBonusBet">0,00 €</strong>
+                <button id="buyBonusPlus" type="button">+</button>
+              </div>
+              <div class="buy-bonus-cost">
+                <span>Costo</span>
+                <strong id="buyBonusCost">0,00 €</strong>
+              </div>
+              <button class="buy-bonus-confirm" id="confirmBuyBonus" type="button">Compra bonus</button>
+            </div>
+          </section>
+          <div class="volume-control" id="volumeControl" hidden>
+            <label for="volumeSlider">Volume</label>
+            <input id="volumeSlider" type="range" min="0" max="1" step="0.01" value="0.45" />
+          </div>
+          <audio id="bgMusic" src="./src/assets/sounds/capy-song.mov" preload="auto" loop></audio>
+          <audio id="wildSound" src="./src/assets/sounds/wild.mp3" preload="auto"></audio>
+          <audio id="bonusSound" src="./src/assets/sounds/bonus.mp3" preload="auto"></audio>
+
+          <section class="overlay-panel paytable-panel" id="paytablePanel" hidden>
+            <button class="overlay-close" id="closePaytable" type="button">Chiudi</button>
+            <h2>Paytable</h2>
+            <p class="panel-note">20 linee fisse. Le vincite sotto sono calcolate sulla puntata selezionata.</p>
+            <div id="paytable"></div>
+          </section>
+
+          <section class="overlay-panel audit-panel" id="auditPanel" hidden>
+            <button class="overlay-close" id="closeAudit" type="button">Chiudi</button>
+            <h2>Audit round</h2>
+            <pre id="auditLog">{}</pre>
+          </section>
+        </section>
+      </div>
+    </main>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
