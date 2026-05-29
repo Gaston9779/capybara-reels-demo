@@ -2,7 +2,7 @@ import { GAME_CONFIG } from "./config.js";
 import { BUTTONS, LAYOUT, SYMBOLS, assetUrl } from "./layout.js";
 
 // API endpoint is injected at deploy time; localhost is dev fallback.
-const API_BASE_URL = window.__GAME_API_URL__ ?? "http://localhost:3000";
+const API_BASE_URL = normalizeApiBaseUrl( window.__GAME_API_URL__ ) ?? "http://localhost:3000";
 let session = null;
 let currentState = "IDLE";
 let lastRound = null;
@@ -172,7 +172,9 @@ async function preloadAssets ()
     "big-win.png",
     "background-bonus.png",
     ...Object.values( SYMBOLS ).map( ( file ) => `symbols/${ file }` ),
-    ...Object.values( BUTTONS ).map( ( button ) => `buttons/${ button.file }` )
+    ...Object.values( BUTTONS )
+      .filter( ( button ) => Boolean( button.file ) )
+      .map( ( button ) => `buttons/${ button.file }` )
   ];
   const audioAssets = [
     els.bgMusic,
@@ -193,6 +195,22 @@ async function preloadAssets ()
     ...audioAssets.map( ( audio ) => preloadAudio( audio ).finally( tick ) )
   ] );
   els.assetLoader.hidden = true;
+}
+
+function normalizeApiBaseUrl ( value )
+{
+  if ( typeof value !== "string" ) return null;
+  let url = value.trim();
+  if ( !url ) return null;
+
+  // Common deploy mistake: "https://https://..."
+  url = url.replace( /^https?:\/\/https?:\/\//i, "https://" );
+
+  // Remove trailing slash to keep fetch paths consistent.
+  url = url.replace( /\/+$/, "" );
+
+  if ( !/^https?:\/\//i.test( url ) ) return null;
+  return url;
 }
 
 function preloadImage ( src )
