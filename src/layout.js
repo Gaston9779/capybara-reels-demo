@@ -1,34 +1,36 @@
 // Pixel layout source-of-truth for the 1438x1024 stage.
+// Increase/decrease this value to move the reel frame, symbols and logo vertically.
+const REELS_GROUP_OFFSET_Y = 54;
+
 export const LAYOUT = {
   canvas: { w: 1438, h: 1024 },
-  reelFrame: { x: 0, y: 0, w: 1438, h: 1024 },
-  reelWindow: { x: 145, y: 246, w: 1150, h: 600 },
+  reelsGroupOffsetY: REELS_GROUP_OFFSET_Y,
+  reelFrame: { x: 252, y: 34 + REELS_GROUP_OFFSET_Y, w: 1130, h: 792 },
+  reelWindow: { x: 366, y: 224 + REELS_GROUP_OFFSET_Y, w: 904, h: 464 },
   grid: {
     cols: 5,
     rows: 3,
-    symbolW: 174,
-    symbolH: 190,
-    startX: 170,
-    startY: 250,
-    gapX: 58,
-    gapY: 10
+    symbolW: 137,
+    symbolH: 147,
+    startX: 386,
+    startY: 227 + REELS_GROUP_OFFSET_Y,
+    gapX: 46,
+    gapY: 8
   },
   spinButton: { x: 629, y: 806, w: 180, h: 180 },
   hud: {
-    balance: { x: 265, y: 884, w: 182, h: 62 },
-    win: { x: 1070, y: 884, w: 182, h: 62 },
+    balance: { x: 180, y: 884, w: 240, h: 62 },
+    bonusMultiplier: { x: 52, y: 86, w: 158, h: 74 },
+    win: { x: 1018, y: 884, w: 230, h: 62 },
     bet: { x: 562, y: 874, w: 80, h: 62 },
     status: { x: 519, y: 910, w: 399, h: 38 }
   },
   buttons: {
     menu: { x: 72, y: 884, w: 61, h: 60 },
-    info: { x: 146, y: 884, w: 61, h: 60 },
     betMinus: { x: 555, y: 883, w: 64, h: 63 },
     betPlus: { x: 811, y: 883, w: 64, h: 63 },
-    maxBet: { x: 888, y: 879, w: 80, h: 70 },
-    buyBonus: { x: 1166, y: 884, w: 96, h: 58 },
-    turbo: { x: 978, y: 883, w: 64, h: 63 },
-    sound: { x: 1320, y: 884, w: 61, h: 60 }
+    buyBonus: { x: 1258, y: 854, w: 166, h: 128 },
+    turbo: { x: 914, y: 883, w: 64, h: 63 }
   },
   paylineColors: [
     // Reused cyclically when >10 lines win in one round.
@@ -67,7 +69,7 @@ export const BUTTONS = {
   betMinus: { file: "btn-minus.png", action: "decreaseBet" },
   betPlus: { file: "btn-plus.png", action: "increaseBet" },
   maxBet: { file: "btn-max-bet.png", action: "setMaxBet" },
-  buyBonus: { file: "", action: "openBuyBonus" },
+  buyBonus: { file: "bonus-button.png", action: "openBuyBonus" },
   spin: { file: "btn-spin.png", action: "spin" },
   turbo: { file: "btn-turbo.png", action: "toggleTurbo" },
   sound: { file: "btn-sound.png", action: "toggleSound" }

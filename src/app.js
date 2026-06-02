@@ -1,5 +1,6 @@
 import { GAME_CONFIG } from "./config.js";
 import { BUTTONS, LAYOUT, SYMBOLS, assetUrl } from "./layout.js";
+import { SarcophagusMeter } from "./sarcophagusMeter.js";
 
 // API endpoint is injected at deploy time; localhost is dev fallback.
 const API_BASE_URL = normalizeApiBaseUrl( window.__GAME_API_URL__ ) ?? "http://localhost:3000";
@@ -14,6 +15,7 @@ let freeSpinsRemaining = 0;
 let bonusAwardedSpins = 0;
 let bonusTotalWin = 0;
 let bonusHudActive = false;
+let activeWheelMultiplier = 1;
 let turboEnabled = false;
 let soundEnabled = false;
 let audioReady = false;
@@ -21,6 +23,7 @@ let serverBetOptions = null;
 let activeCelebrationSkip = null;
 let queuedSpinAfterWin = false;
 let buyBonusBetIndex = 0;
+let sarcophagusMeter = null;
 const reelWheelSounds = Array.from( { length: GAME_CONFIG.reels }, () =>
 {
   const audio = new Audio( assetUrl( "sounds/wheel.mp3" ) );
@@ -79,12 +82,18 @@ const els = {
   winCelebrationAmount: document.querySelector( "#winCelebrationAmount" ),
   bonusIntro: document.querySelector( "#bonusIntro" ),
   bonusIntroButton: document.querySelector( "#bonusIntroButton" ),
+  bonusWheel: document.querySelector( "#bonusWheel" ),
+  bonusWheelDial: document.querySelector( "#bonusWheelDial" ),
+  bonusWheelResult: document.querySelector( "#bonusWheelResult" ),
+  sarcophagusContainer: document.querySelector( "#sarcophagusContainer" ),
   balance: document.querySelector( "#balance" ),
+  bonusMultiplier: document.querySelector( "#bonusMultiplier" ),
   roundState: document.querySelector( "#roundState" ),
   bonusState: document.querySelector( "#bonusState" ),
   lastWin: document.querySelector( "#lastWin" ),
   betSelect: document.querySelector( "#betSelect" ),
   stageButtons: document.querySelector( "#stageButtons" ),
+  gameMenu: document.querySelector( "#gameMenu" ),
   bgMusic: document.querySelector( "#bgMusic" ),
   wildSound: document.querySelector( "#wildSound" ),
   bonusSound: document.querySelector( "#bonusSound" ),
@@ -120,7 +129,7 @@ function onGlobalKeyDown ( event )
   const tag = document.activeElement?.tagName;
   if ( tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" ) return;
   // Ignore while overlays are open.
-  if ( !els.paytablePanel.hidden || !els.auditPanel.hidden ) return;
+  if ( !els.paytablePanel.hidden || !els.auditPanel.hidden || !els.gameMenu.hidden ) return;
 
   // Ignore only while reels/API are busy. During win presentation Space skips and queues next spin.
   if ( currentState === "SPINNING" || currentState === "SPIN_REQUESTED" ) return;
@@ -133,6 +142,7 @@ async function setup ()
 {
   // Bind UI before network work so overlays remain usable if /init is slow.
   setupLayout();
+  sarcophagusMeter = new SarcophagusMeter( els.stage ).init();
   renderButtons();
   clearPaylineLabels();
   renderScreen( emptyScreen() );
@@ -156,6 +166,7 @@ function bindUiEvents ()
   els.volumeSlider.addEventListener( "input", updateMusicVolume );
   document.addEventListener( "pointerdown", closeVolumeOnOutsideClick );
   document.addEventListener( "pointerdown", closeOverlaysOnOutsideClick );
+  els.gameMenu.addEventListener( "click", onGameMenuClick );
   els.closePaytable.addEventListener( "click", () => setPanel( els.paytablePanel, false ) );
   els.closeAudit.addEventListener( "click", () => setPanel( els.auditPanel, false ) );
   els.winCelebration.addEventListener( "pointerdown", skipActiveCelebration );
@@ -176,6 +187,14 @@ async function preloadAssets ()
     "win.png",
     "big-win.png",
     "background-bonus.png",
+    "coin.png",
+    "sprites/sarcophagus_1.png",
+    "sprites/sarcophagus_2.png",
+    "sprites/sarcophagus_3.png",
+    "sprites/sarcophagus_4.png",
+    "sprites/sarcophagus_5.png",
+    "sprites/sarcophagus_6.png",
+    "sprites/sarcophagus_7.png",
     ...Object.values( SYMBOLS ).map( ( file ) => `symbols/${ file }` ),
     ...Object.values( BUTTONS )
       .filter( ( button ) => Boolean( button.file ) )
@@ -308,23 +327,24 @@ async function spin ()
     showError( err );
     return;
   }
-  updateBonusTracking( response );
-
   currentState = "SPINNING";
   startSpinUi();
   displayedBalance = response.balanceAfterDebit;
   displayedWin = 0;
-  updateHud( response );
+  updateHud();
   await animateReelsToResult( response.result.screen );
 
   lastRound = response;
   renderScreen( response.result.screen, response.result.lineWins );
   stopSpinUi();
-  currentState = response.result.freeSpins.triggered ? "BONUS_TRIGGERED" : "RESULT_READY";
-  updateHud( response );
+  await playSarcophagusMeter( response );
+  const startsNewBonus = response.result.freeSpins.triggered && response.round?.mode === "BASE";
+  currentState = startsNewBonus ? "BONUS_TRIGGERED" : "RESULT_READY";
+  updateHud();
 
   await presentWin( response );
-  if ( response.result.freeSpins.triggered )
+  commitRoundTracking( response );
+  if ( startsNewBonus )
   {
     queuedSpinAfterWin = false;
     await presentScatterTrigger( response.result.screen );
@@ -333,6 +353,7 @@ async function spin ()
     updateHud( response );
     await sleep( getSpinTiming().bonusIntroDelayMs );
     await showBonusIntro();
+    await showBonusWheel( response.round?.wheelResult );
     currentState = "FREE_SPINS";
     bonusHudActive = true;
     updateHud( response );
@@ -389,7 +410,6 @@ async function spinApi ( payload )
 
 function mapSpinResponse ( apiResponse, sessionId )
 {
-  freeSpinsRemaining = apiResponse.freeSpinsRemaining;
   const stakeDebit = apiResponse.featureCost ?? ( apiResponse.round.mode === "BASE" ? apiResponse.bet.totalBet : 0 );
   return {
     roundId: apiResponse.roundId,
@@ -411,10 +431,17 @@ function mapSpinResponse ( apiResponse, sessionId )
   };
 }
 
+function commitRoundTracking ( response )
+{
+  freeSpinsRemaining = response.result.freeSpins?.remaining ?? response.round?.freeSpinsRemaining ?? 0;
+  updateBonusTracking( response );
+}
+
 function updateBonusTracking ( response )
 {
   const awarded = response.result.freeSpins?.awarded ?? 0;
   const startsNewBonus = response.result.freeSpins?.triggered && response.round?.mode === "BASE";
+  const roundWheelMultiplier = response.round?.wheelMultiplier ?? response.round?.wheelResult?.multiplier ?? 1;
   if ( startsNewBonus )
   {
     // A new trigger must clear the previous bonus totals, but must NOT clear
@@ -424,16 +451,20 @@ function updateBonusTracking ( response )
     bonusAwardedSpins = 0;
     bonusTotalWin = 0;
     bonusHudActive = false;
+    activeWheelMultiplier = roundWheelMultiplier;
     els.bonusState.textContent = "";
     els.bonusState.hidden = true;
   }
+  if ( roundWheelMultiplier > 1 ) activeWheelMultiplier = roundWheelMultiplier;
   if ( awarded > 0 )
   {
     bonusAwardedSpins += awarded;
   }
   if ( response.round?.mode === "FREE_SPIN" )
   {
-    bonusTotalWin += response.result.totalWin;
+    bonusTotalWin = response.round.bonusWinFinal > 0
+      ? response.round.bonusWinFinal
+      : response.round.bonusWinRaw;
   }
 }
 
@@ -453,8 +484,32 @@ function resetBonusTracking ()
   bonusTotalWin = 0;
   freeSpinsRemaining = 0;
   bonusHudActive = false;
+  activeWheelMultiplier = 1;
   els.bonusState.textContent = "";
   els.bonusState.hidden = true;
+}
+
+async function playSarcophagusMeter ( response )
+{
+  const scatterPositions = scatterPositionsFromScreen( response.result.screen );
+  if ( !scatterPositions.length ) return;
+  const startsNewBonus = response.result.freeSpins?.triggered && response.round?.mode === "BASE";
+  await sarcophagusMeter?.handleScatterResult( scatterPositions, startsNewBonus );
+}
+
+function scatterPositionsFromScreen ( screen )
+{
+  const positions = [];
+  for ( let row = 0; row < GAME_CONFIG.rows; row++ )
+  {
+    for ( let reel = 0; reel < GAME_CONFIG.reels; reel++ )
+    {
+      if ( screen[ row ]?.[ reel ] !== "SCATTER" ) continue;
+      const point = symbolCenter( reel, row );
+      positions.push( { reel, row, x: point.x, y: point.y } );
+    }
+  }
+  return positions;
 }
 
 async function presentScatterTrigger ( screen )
@@ -541,11 +596,13 @@ function setupLayout ()
   const { canvas, reelFrame, reelWindow, hud } = LAYOUT;
   els.stage.style.setProperty( "--stage-w", canvas.w );
   els.stage.style.setProperty( "--stage-h", canvas.h );
+  els.stage.style.setProperty( "--reels-group-offset-y", `${ LAYOUT.reelsGroupOffsetY }px` );
   updateStageScale();
   window.addEventListener( "resize", updateStageScale );
   setRect( document.querySelector( ".stage-frame" ), reelFrame );
   setRect( els.reelsFrame, reelWindow );
   setRect( els.balance.parentElement, hud.balance );
+  setRect( els.bonusMultiplier, hud.bonusMultiplier );
   setRect( els.lastWin.parentElement, hud.win );
   setRect( els.bonusState, hud.status );
   setRect( els.roundState, hud.bet );
@@ -618,10 +675,30 @@ function renderPaytable ()
     <div class="pay-symbol">${ renderSymbolMarkup( "SCATTER", "small" ) }</div>
     <div class="pay-values">
       <strong>Scatter</strong>
-      <span>3: ${ formatMoney( bet.totalBet * 2 ) } + 10 FS | 4: ${ formatMoney( bet.totalBet * 10 ) } + 15 FS | 5: ${ formatMoney( bet.totalBet * 50 ) } + 20 FS</span>
+      <span>3: ${ formatMoney( bet.totalBet * 2 ) } + ${ GAME_CONFIG.freeSpins.awards[ 3 ] } FS | 4: ${ formatMoney( bet.totalBet * 10 ) } + ${ GAME_CONFIG.freeSpins.awards[ 4 ] } FS | 5: ${ formatMoney( bet.totalBet * 50 ) } + ${ GAME_CONFIG.freeSpins.awards[ 5 ] } FS</span>
     </div>
   `;
   fragment.append( scatter );
+  const retrigger = document.createElement( "div" );
+  retrigger.className = "pay-row";
+  retrigger.innerHTML = `
+    <div class="pay-symbol">${ renderSymbolMarkup( "SCATTER", "small" ) }</div>
+    <div class="pay-values">
+      <strong>Bonus Retrigger</strong>
+      <span>Durante i Free Spins: 2 Scatter +${ GAME_CONFIG.bonusRetrigger.twoScatterAward } FS | 3+ Scatter paga e +${ GAME_CONFIG.bonusRetrigger.threePlusScatterAward } FS</span>
+    </div>
+  `;
+  fragment.append( retrigger );
+  const wheel = document.createElement( "div" );
+  wheel.className = "pay-row";
+  wheel.innerHTML = `
+    <div class="pay-symbol"><div class="symbol-inner small"><span>x2-x10</span></div></div>
+    <div class="pay-values">
+      <strong>Bonus Wheel</strong>
+      <span>Ogni vincita Free Spins viene moltiplicata dal risultato della ruota.</span>
+    </div>
+  `;
+  fragment.append( wheel );
   els.paytable.append( fragment );
 }
 
@@ -673,7 +750,7 @@ function createComboLabel ( win, points, color )
 {
   const label = document.createElement( "div" );
   label.className = "payline-combo-label";
-  label.textContent = `${ win.count }x ${ win.symbol }`;
+  label.textContent = `${ win.count } ${ GAME_CONFIG.symbols[ win.symbol ]?.label ?? win.symbol }`;
   const anchor = points[ Math.min( points.length - 1, Math.floor( points.length / 2 ) ) ];
   label.style.setProperty( "--line-color", color );
   label.style.left = `${ anchor.x }px`;
@@ -710,6 +787,7 @@ function clearPaylines ()
 
 async function presentWinCelebration ( response )
 {
+  if ( response.round?.mode === "FREE_SPIN" && isBonusComplete( response ) ) return;
   const winX = response.result.totalWin / response.bet.totalBet;
   if ( winX < 5 )
   {
@@ -760,6 +838,30 @@ function showBonusIntro ()
     // Safety fallback for demo stability: never leave the game stuck behind a modal/promise.
     fallbackTimer = window.setTimeout( close, 12000 );
   } );
+}
+
+async function showBonusWheel ( wheelResult )
+{
+  if ( !wheelResult ) return;
+  const labels = [ "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10" ];
+  const segmentAngle = 360 / labels.length;
+  const centerOffset = segmentAngle / 2;
+  const targetIndex = Math.max( 0, labels.indexOf( wheelResult.label ) );
+  els.bonusWheelDial.innerHTML = labels
+    .map( ( label, index ) => `<span style="--angle:${ index * segmentAngle + centerOffset }deg">${ label }</span>` )
+    .join( "" );
+  els.bonusWheelDial.style.transition = "none";
+  els.bonusWheelDial.style.transform = "rotate(0deg)";
+  els.bonusWheelResult.textContent = "";
+  els.bonusWheel.hidden = false;
+
+  await sleep( 50 );
+  els.bonusWheelDial.style.transition = "transform 2800ms cubic-bezier(.12, .75, .08, 1)";
+  els.bonusWheelDial.style.transform = `rotate(${ 1440 - targetIndex * segmentAngle - centerOffset }deg)`;
+  await sleep( 2850 );
+  els.bonusWheelResult.textContent = wheelResult.label;
+  await sleep( 950 );
+  els.bonusWheel.hidden = true;
 }
 
 function setBonusIntro ( visible )
@@ -991,6 +1093,8 @@ function updateHud ( response = null )
   const bonusText = bonusLabel();
   els.bonusState.textContent = bonusText;
   els.bonusState.hidden = bonusText === "";
+  els.bonusMultiplier.hidden = !bonusHudActive || activeWheelMultiplier <= 1;
+  els.bonusMultiplier.querySelector( "strong" ).textContent = `x${ activeWheelMultiplier }`;
   setSpinDisabled( currentState === "SPINNING" || currentState === "SPIN_REQUESTED" );
   if ( response?.round ) els.auditLog.textContent = JSON.stringify( response.round, null, 2 );
 }
@@ -1101,12 +1205,31 @@ function runButtonAction ( action )
     increaseBet,
     setMaxBet,
     openPaytable: () => setPanel( els.paytablePanel, true ),
-    openMenu: () => setPanel( els.auditPanel, true ),
+    openMenu: toggleGameMenu,
+    openAudit: () => setPanel( els.auditPanel, true ),
     openBuyBonus,
     toggleTurbo,
     toggleSound
   };
   actions[ action ]?.();
+}
+
+function toggleGameMenu ()
+{
+  els.gameMenu.hidden = !els.gameMenu.hidden;
+}
+
+function closeGameMenu ()
+{
+  els.gameMenu.hidden = true;
+}
+
+function onGameMenuClick ( event )
+{
+  const item = event.target.closest( "[data-menu-action]" );
+  if ( !item ) return;
+  runButtonAction( item.dataset.menuAction );
+  closeGameMenu();
 }
 
 function toggleTurbo ()
@@ -1139,12 +1262,19 @@ function closeVolumeOnOutsideClick ( event )
   if ( els.volumeControl.hidden ) return;
   const soundButton = document.querySelector( '[data-action="toggleSound"]' );
   const target = event.target;
-  if ( els.volumeControl.contains( target ) || soundButton?.contains( target ) ) return;
+  if ( els.volumeControl.contains( target ) || soundButton?.contains( target ) || els.gameMenu.contains( target ) ) return;
   els.volumeControl.hidden = true;
 }
 
 function closeOverlaysOnOutsideClick ( event )
 {
+  if ( !els.gameMenu.hidden
+    && !els.gameMenu.contains( event.target )
+    && !event.target.closest( '[data-action="openMenu"]' ) )
+  {
+    closeGameMenu();
+  }
+
   // Buy-bonus has a full-screen backdrop: clicking the dark area closes it.
   if ( !els.buyBonusModal.hidden && event.target === els.buyBonusModal )
   {
@@ -1155,14 +1285,16 @@ function closeOverlaysOnOutsideClick ( event )
   // Paytable/audit are centered panels without a backdrop: any click outside closes them.
   if ( !els.paytablePanel.hidden
     && !els.paytablePanel.contains( event.target )
-    && !event.target.closest( '[data-action="openPaytable"]' ) )
+    && !event.target.closest( '[data-action="openPaytable"]' )
+    && !els.gameMenu.contains( event.target ) )
   {
     setPanel( els.paytablePanel, false );
   }
 
   if ( !els.auditPanel.hidden
     && !els.auditPanel.contains( event.target )
-    && !event.target.closest( '[data-action="openMenu"]' ) )
+    && !event.target.closest( '[data-action="openAudit"]' )
+    && !els.gameMenu.contains( event.target ) )
   {
     setPanel( els.auditPanel, false );
   }
@@ -1258,7 +1390,7 @@ function renderBuyBonusModal ()
 {
   const bet = normalizeBet( JSON.parse( els.betSelect.options[ buyBonusBetIndex ].value ) );
   els.buyBonusBet.textContent = formatMoney( bet.totalBet );
-  els.buyBonusCost.textContent = formatMoney( bet.totalBet * 30 );
+  els.buyBonusCost.textContent = formatMoney( Math.round( bet.totalBet * GAME_CONFIG.buyBonusCostMultiplier ) );
 }
 
 async function buyBonus ()
@@ -1285,7 +1417,6 @@ async function buyBonus ()
     showError( err );
     return;
   }
-  updateBonusTracking( response );
   currentState = "SPINNING";
   displayedBalance = response.balanceAfterDebit;
   displayedWin = 0;
@@ -1294,13 +1425,16 @@ async function buyBonus ()
   await animateReelsToResult( response.result.screen );
   renderScreen( response.result.screen, response.result.lineWins );
   stopSpinUi();
+  await playSarcophagusMeter( response );
   await presentWin( response );
+  commitRoundTracking( response );
   await presentScatterTrigger( response.result.screen );
   displayedWin = response.result.totalWin;
   displayedBalance = response.balanceAfterWin;
   updateHud( response );
   await sleep( getSpinTiming().bonusIntroDelayMs );
   await showBonusIntro();
+  await showBonusWheel( response.round?.wheelResult );
   currentState = "FREE_SPINS";
   bonusHudActive = true;
   updateHud( response );

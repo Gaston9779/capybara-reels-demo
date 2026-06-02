@@ -1,4 +1,4 @@
-import type { Payline, SymbolId } from "../../../shared/types/game.js";
+import type { BonusRetriggerConfig, BonusWheelConfig, Payline, SymbolId } from "../../../shared/types/game.js";
 
 // Symbol metadata is UI-facing (labels/icons/classes) but kept server-side to
 // avoid duplicated “game definition” between frontend and backend.
@@ -30,6 +30,9 @@ export interface GameConfig {
     maxMultiplier: number;
     stepOnWin: number;
   };
+  bonusRetrigger: BonusRetriggerConfig;
+  bonusWheel: BonusWheelConfig;
+  buyBonusCostMultiplier: number;
   paylines: Payline[];
   reelsStrips: SymbolId[][];
   targets: {
@@ -44,7 +47,7 @@ export interface GameConfig {
 export const GAME_CONFIG: GameConfig = {
   gameCode: "treasure_reels",
   version: "treasure-reels-v0.1.0",
-  mathVersion: "treasure-reels-math-v0.1.0",
+  mathVersion: "treasure-reels-math-v0.2.0",
   reels: 5,
   rows: 3,
   fixedPaylines: 20,
@@ -89,13 +92,34 @@ export const GAME_CONFIG: GameConfig = {
     WILD: { 3: 3, 4: 12, 5: 50 }
   },
   scatterPaytable: { 3: 2, 4: 10, 5: 50 },
-  // Progressive free spins: multiplier increases on winning free spins up to cap.
+  // Bonus wins are multiplied only by the wheel result. These fields stay for
+  // contract compatibility but do not compound the wheel multiplier.
   freeSpins: {
-    awards: { 3: 10, 4: 15, 5: 20 },
+    awards: { 3: 8, 4: 10, 5: 12 },
     startMultiplier: 1,
-    maxMultiplier: 5,
-    stepOnWin: 1
+    maxMultiplier: 1,
+    stepOnWin: 0
   },
+  bonusRetrigger: {
+    twoScatterAward: 2,
+    threePlusScatterAward: 4
+  },
+  bonusWheel: {
+    segments: [
+      { multiplier: 2, weight: 5600 },
+      { multiplier: 3, weight: 2400 },
+      { multiplier: 4, weight: 1120 },
+      { multiplier: 5, weight: 500 },
+      { multiplier: 6, weight: 200 },
+      { multiplier: 7, weight: 90 },
+      { multiplier: 8, weight: 45 },
+      { multiplier: 9, weight: 30 },
+      { multiplier: 10, weight: 15 }
+    ],
+    // Bonus wins must stay consistent with the paytable shown in UI.
+    rawWinScale: 1
+  },
+  buyBonusCostMultiplier: 31.5,
   paylines: [
     // 20 fixed paylines, each entry is [rowReel1..rowReel5].
     [1, 1, 1, 1, 1],

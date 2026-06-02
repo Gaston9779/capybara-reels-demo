@@ -2,20 +2,22 @@
 
 ## Scope
 
-`Treasure Reels` e una slot demo/play-money HTML5 5x3 con 20 paylines fisse, Wild, Scatter, Free Spins e moltiplicatore progressivo. Il codice runtime vive in `src/app.js`, `src/engine.js` e `src/config.js`; i tipi contrattuali principali sono in `src/types.ts`.
+`Treasure Reels` e una slot demo/play-money HTML5 5x3 con 20 paylines fisse, Wild, Scatter, Free Spins e Bonus Wheel x2-x10. Il backend e la source of truth dei risultati; il frontend presenta solo griglia, linee, moltiplicatori e totali ricevuti.
 
 ## Architecture
 
-- `src/config.js`: math pack, paytable, paylines, reel strips, bet options.
-- `src/engine.js`: server demo locale, RNG, round state, idempotenza, audit log, valutazione vincite.
+- `backend/src/config/gameConfig.ts`: math pack runtime, paytable, paylines, reel strips, bet options, Bonus Wheel, retrigger e costo buy bonus.
+- `src/config.js`: copia frontend per rendering paytable e controlli UI.
+- `backend/src/spin-engine/spinEngine.ts`: RNG, round state, idempotenza, audit log, valutazione vincite.
 - `src/app.js`: rendering e state machine frontend. Non genera risultati matematici.
-- `src/simulate.js`: simulatore RTP veloce via Node.
+- `backend/src/simulation/simulator.ts`: simulatore RTP backend.
 
 ## Backend-first rules
 
 - Il client invia una bet e una `idempotencyKey`.
 - Il server demo calcola `reelStops`, `screen`, `lineWins`, `scatter`, `freeSpins`, `totalWin`.
 - Il frontend anima solo il risultato ricevuto.
+- Nel bonus, i retrigger sono calcolati backend-side: 2 Scatter danno +2 giri, 3+ Scatter pagano e danno +4 giri.
 - `collect` accredita il balance demo solo quando non ci sono free spins attivi.
 - Le chiamate duplicate con stessa idempotency key restituiscono la stessa risposta.
 
@@ -29,7 +31,7 @@ GET /game/round/:id
 POST /game/rollback
 ```
 
-Questa demo implementa gli stessi contratti in memoria con `DemoGameServer`, cosi si puo sostituire il trasporto locale con HTTP senza cambiare la math.
+Il contratto API espone i risultati calcolati dal backend; il frontend non ricalcola il payout.
 
 ## Math targets
 

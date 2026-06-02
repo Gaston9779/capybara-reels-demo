@@ -7,7 +7,10 @@
 - Simboli: 9 regular, `WILD`, `SCATTER`.
 - Wild: sostituisce tutti i simboli regular, non sostituisce Scatter.
 - Scatter: 3+ attivano Free Spins.
-- Free Spins: moltiplicatore progressivo fino al cap configurato.
+- Free Spins: nel base game 3/4/5 Scatter assegnano 8/10/12 giri gratuiti.
+- Bonus Retrigger: durante i Free Spins, 2 Scatter assegnano +2 giri senza pagamento Scatter; 3+ Scatter pagano Scatter e assegnano +4 giri.
+- Bonus Wheel: all'ingresso del bonus assegna un moltiplicatore x2-x10. Ogni vincita dei Free Spins e moltiplicata solo dal risultato della ruota.
+- Buy Bonus: costo configurato lato backend a 31.5x puntata totale.
 
 ## Targets
 
@@ -19,7 +22,7 @@
 
 ## Source Of Truth
 
-La math config vive in `src/config.js` ed e importata dal backend tramite `backend/src/config/gameConfig.ts`. Ogni round salva `configVersion` e `mathVersion`.
+La source of truth runtime vive nel backend in `backend/src/config/gameConfig.ts`. Il frontend usa `src/config.js` per rendering/paytable e deve restare allineato alla config backend. Ogni round salva `configVersion` e `mathVersion`.
 
 ## Evaluation Flow
 
@@ -28,7 +31,7 @@ La math config vive in `src/config.js` ed e importata dal backend tramite `backe
 3. `evaluatePaylines` valuta le 20 paylines da sinistra a destra.
 4. `applyWilds` sceglie il miglior simbolo pagante considerando Wild.
 5. `evaluateScatter` conta Scatter su tutta la griglia.
-6. Free Spins e moltiplicatore vengono applicati.
+6. Nei Free Spins il backend applica il moltiplicatore della Bonus Wheel al totale raw di line wins + Scatter.
 7. Il totale viene cappato al max win configurato.
 
 ## Simulation

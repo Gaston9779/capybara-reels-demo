@@ -47,13 +47,32 @@ export const GAME_CONFIG = {
     WILD: { 3: 3, 4: 12, 5: 50 }
   },
   scatterPaytable: { 3: 2, 4: 10, 5: 50 },
-  // Progressive free spins: multiplier increases on winning free spins up to cap.
+  // Bonus wins are multiplied only by the wheel result.
   freeSpins: {
-    awards: { 3: 10, 4: 15, 5: 20 },
+    awards: { 3: 8, 4: 10, 5: 12 },
     startMultiplier: 1,
-    maxMultiplier: 5,
-    stepOnWin: 1
+    maxMultiplier: 1,
+    stepOnWin: 0
   },
+  bonusRetrigger: {
+    twoScatterAward: 2,
+    threePlusScatterAward: 4
+  },
+  bonusWheel: {
+    segments: [
+      { multiplier: 2, weight: 5600 },
+      { multiplier: 3, weight: 2400 },
+      { multiplier: 4, weight: 1120 },
+      { multiplier: 5, weight: 500 },
+      { multiplier: 6, weight: 200 },
+      { multiplier: 7, weight: 90 },
+      { multiplier: 8, weight: 45 },
+      { multiplier: 9, weight: 30 },
+      { multiplier: 10, weight: 15 }
+    ],
+    rawWinScale: 1
+  },
+  buyBonusCostMultiplier: 31.5,
   paylines: [
     // 20 fixed paylines, each entry is [rowReel1..rowReel5].
     [1, 1, 1, 1, 1],

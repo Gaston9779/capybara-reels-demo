@@ -41,7 +41,6 @@ for (let i = 0; i < spins; i++) {
     bonusState.awarded += result.freeSpins.awarded;
     if (isFree) {
       bonusState.remaining = Math.max(0, bonusState.remaining - 1);
-      if (result.totalWin > 0) bonusState.currentMultiplier = Math.min(5, bonusState.currentMultiplier + 1);
     }
     if (bonusState.remaining <= 0) bonusState = null;
   }

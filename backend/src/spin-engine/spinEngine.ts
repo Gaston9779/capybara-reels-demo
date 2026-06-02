@@ -1,6 +1,7 @@
 import type { BuyBonusRequest, InitRequest, InitResponse, SpinRequest, SpinResponse } from "../../../shared/contracts/api.js";
-import type { Bet, Grid, RoundRecord, SessionState, SpinResult } from "../../../shared/types/game.js";
-import { advanceBonusState, triggerFreeSpins } from "../bonus/freeSpins.js";
+import type { Bet, BonusState, Grid, RoundRecord, SessionState, SpinResult, WheelResult } from "../../../shared/types/game.js";
+import { createBonusWheelEngine } from "../bonus/bonusWheel.js";
+import { retriggerFreeSpins, triggerFreeSpins } from "../bonus/freeSpins.js";
 import { GAME_CONFIG, type GameConfig } from "../config/gameConfig.js";
 import { buildGrid, evaluatePaylines, evaluateScatter, normalizeBet, validateBet } from "../math/paylines.js";
 import { createDeterministicRng } from "../rng/deterministicRng.js";
@@ -11,11 +12,14 @@ let idSequence = 0;
 export class SpinEngine {
   // Rotating daily seed for demo reproducibility and basic unpredictability.
   private readonly serverSeed = `treasure-reels-demo-seed-${new Date().toISOString().slice(0, 10)}`;
+  private readonly wheelEngine;
 
   constructor(
     private readonly store = new MemoryRoundStore(),
     private readonly config: GameConfig = GAME_CONFIG
-  ) {}
+  ) {
+    this.wheelEngine = createBonusWheelEngine(this.config.bonusWheel);
+  }
 
   init(request: InitRequest = {}): InitResponse {
     // Session starts with play-money balance and no active bonus.
@@ -73,9 +77,17 @@ export class SpinEngine {
       bonusState: session.activeBonus
     });
 
-    session.balance += result.totalWin;
-    // Bonus state advances after each spin (base or free spin).
-    session.activeBonus = advanceBonusState(session.activeBonus, result, bet, this.config);
+    if (isFreeSpin) {
+      session.balance += this.advanceActiveBonus(session, result, bet);
+    } else {
+      session.balance += result.totalWin;
+      if (result.freeSpins.triggered) {
+        const wheelResult = this.generateWheelResult(roundId, spinIndex, request.idempotencyKey);
+        result.wheelResult = wheelResult;
+        result.wheelMultiplier = wheelResult.multiplier;
+        session.activeBonus = this.createBonusState(result, bet, wheelResult);
+      }
+    }
 
     const round: RoundRecord = {
       roundId,
@@ -91,7 +103,11 @@ export class SpinEngine {
       freeSpins: { ...result.freeSpins, remaining: session.activeBonus?.remaining ?? 0 },
       multiplier: result.multiplier,
       totalWin: result.totalWin,
-      bonusTriggered: result.freeSpins.triggered,
+      bonusTriggered: result.freeSpins.triggered && !isFreeSpin,
+      wheelResult: result.wheelResult ?? null,
+      wheelMultiplier: result.wheelMultiplier ?? null,
+      bonusWinRaw: result.bonusWinRaw ?? 0,
+      bonusWinFinal: result.bonusWinFinal ?? 0,
       freeSpinsRemaining: session.activeBonus?.remaining ?? 0,
       mathVersion: this.config.mathVersion,
       configVersion: this.config.version,
@@ -137,7 +153,7 @@ export class SpinEngine {
     if ((session.activeBonus?.remaining ?? 0) > 0) throw new Error("BONUS_ALREADY_ACTIVE");
     const bet = normalizeBet(request.bet, this.config);
     validateBet(bet, this.config);
-    const cost = bet.totalBet * 30;
+    const cost = Math.round(bet.totalBet * this.config.buyBonusCostMultiplier);
     if (session.balance < cost) throw new Error("INSUFFICIENT_BALANCE");
 
     const balanceBefore = session.balance;
@@ -151,7 +167,10 @@ export class SpinEngine {
       bet
     });
     session.balance += result.totalWin;
-    session.activeBonus = advanceBonusState(null, result, bet, this.config);
+    const wheelResult = this.generateWheelResult(roundId, spinIndex, request.idempotencyKey);
+    result.wheelResult = wheelResult;
+    result.wheelMultiplier = wheelResult.multiplier;
+    session.activeBonus = this.createBonusState(result, bet, wheelResult);
 
     const round: RoundRecord = {
       roundId,
@@ -168,6 +187,10 @@ export class SpinEngine {
       multiplier: result.multiplier,
       totalWin: result.totalWin,
       bonusTriggered: true,
+      wheelResult: result.wheelResult ?? null,
+      wheelMultiplier: result.wheelMultiplier ?? null,
+      bonusWinRaw: result.bonusWinRaw ?? 0,
+      bonusWinFinal: result.bonusWinFinal ?? 0,
       freeSpinsRemaining: session.activeBonus?.remaining ?? 0,
       mathVersion: this.config.mathVersion,
       configVersion: this.config.version,
@@ -210,7 +233,9 @@ export class SpinEngine {
       win: round.totalWin,
       bonusTriggered: round.bonusTriggered,
       balanceBefore: round.balanceBefore,
-      featureCost: round.roundId.startsWith("buy_") ? round.bet.totalBet * 30 : undefined,
+      featureCost: round.roundId.startsWith("buy_")
+        ? Math.round(round.bet.totalBet * this.config.buyBonusCostMultiplier)
+        : undefined,
       freeSpinsRemaining: round.freeSpinsRemaining,
       balanceAfter: round.balanceAfter,
       configVersion: round.configVersion,
@@ -233,7 +258,9 @@ export class SpinEngine {
       win: round.totalWin,
       bonusTriggered: round.bonusTriggered,
       balanceBefore: round.balanceBefore,
-      featureCost: round.roundId.startsWith("buy_") ? round.bet.totalBet * 30 : undefined,
+      featureCost: round.roundId.startsWith("buy_")
+        ? Math.round(round.bet.totalBet * this.config.buyBonusCostMultiplier)
+        : undefined,
       freeSpinsRemaining: round.freeSpinsRemaining,
       balanceAfter: round.balanceAfter,
       configVersion: round.configVersion,
@@ -272,21 +299,27 @@ export class SpinEngine {
     });
     const reelStops = this.config.reelsStrips.map((strip) => Math.floor(rng.next() * strip.length));
     const grid = buildGrid(this.config.reelsStrips, reelStops, this.config.rows);
-    const multiplier = input.bonusState?.currentMultiplier ?? 1;
     const lines = evaluatePaylines(this.config, grid, input.bet);
     const scatter = evaluateScatter(this.config, grid, input.bet);
-    const freeSpins = triggerFreeSpins(scatter.count, this.config);
-    // Apply free-spin multiplier and enforce configured max win cap.
-    const uncappedWin = Math.round((lines.totalWin + scatter.win) * multiplier);
+    const freeSpins = input.bonusState
+      ? retriggerFreeSpins(scatter.count, this.config)
+      : triggerFreeSpins(scatter.count, this.config);
+    const bonusScale = input.bonusState ? this.config.bonusWheel.rawWinScale : 1;
+    const wheelMultiplier = input.bonusState?.wheelMultiplier ?? 1;
+    const uncappedWin = Math.round((lines.totalWin + scatter.win) * bonusScale * wheelMultiplier);
     const totalWin = Math.min(uncappedWin, input.bet.totalBet * this.config.targets.maxWinX);
     const result: SpinResult = {
       reelStops,
       grid,
       winningLines: lines.wins,
       scatter,
-      multiplier,
+      multiplier: wheelMultiplier,
       freeSpins,
-      totalWin
+      totalWin,
+      wheelResult: input.bonusState?.wheelResult,
+      wheelMultiplier: input.bonusState?.wheelMultiplier,
+      bonusWinRaw: input.bonusState?.bonusWinRaw ?? 0,
+      bonusWinFinal: input.bonusState?.bonusWinFinal ?? 0
     };
     // Keep audit out of public JSON shape but available for persisted round data.
     Object.defineProperty(result, "__audit", { value: rng.audit, enumerable: false });
@@ -318,7 +351,9 @@ export class SpinEngine {
       scatter,
       multiplier: 1,
       freeSpins,
-      totalWin
+      totalWin,
+      bonusWinRaw: 0,
+      bonusWinFinal: 0
     };
     Object.defineProperty(result, "__audit", { value: resultAudit(base), enumerable: false });
     return result;
@@ -328,6 +363,58 @@ export class SpinEngine {
     const session = this.store.getSession(sessionId);
     if (!session) throw new Error("INVALID_SESSION");
     return session;
+  }
+
+  private generateWheelResult(roundId: string, spinIndex: number, nonce: string): WheelResult {
+    const rng = createDeterministicRng({
+      serverSeed: this.serverSeed,
+      nonce: `${nonce}:bonus-wheel`,
+      roundId,
+      spinIndex
+    });
+    return this.wheelEngine.select(rng.next());
+  }
+
+  private createBonusState(result: SpinResult, bet: Bet, wheelResult: WheelResult): BonusState {
+    return {
+      remaining: result.freeSpins.awarded,
+      awarded: result.freeSpins.awarded,
+      currentMultiplier: this.config.freeSpins.startMultiplier,
+      totalBonusWin: 0,
+      originalBet: bet,
+      wheelResult,
+      wheelMultiplier: wheelResult.multiplier,
+      bonusWinRaw: 0,
+      bonusWinFinal: 0
+    };
+  }
+
+  private advanceActiveBonus(session: SessionState, result: SpinResult, bet: Bet): number {
+    const bonus = session.activeBonus;
+    if (!bonus) throw new Error("BONUS_STATE_REQUIRED");
+
+    if (result.freeSpins.triggered) {
+      bonus.remaining += result.freeSpins.awarded;
+      bonus.awarded += result.freeSpins.awarded;
+    }
+
+    bonus.remaining = Math.max(0, bonus.remaining - 1);
+    const rawWin = Math.round(result.totalWin / bonus.wheelMultiplier);
+    bonus.bonusWinRaw += rawWin;
+    bonus.totalBonusWin = bonus.bonusWinRaw;
+    bonus.bonusWinFinal += result.totalWin;
+    result.bonusWinRaw = bonus.bonusWinRaw;
+    result.bonusWinFinal = bonus.bonusWinFinal;
+    result.wheelResult = bonus.wheelResult;
+    result.wheelMultiplier = bonus.wheelMultiplier;
+
+    if (bonus.remaining > 0) {
+      session.activeBonus = bonus;
+      return result.totalWin;
+    }
+
+    session.activeBonus = null;
+    return result.totalWin;
   }
 }
 

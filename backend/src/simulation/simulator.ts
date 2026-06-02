@@ -1,20 +1,25 @@
 import type { SimulateRequest, SimulateResponse } from "../../../shared/contracts/api.js";
-import type { Bet, BonusState } from "../../../shared/types/game.js";
+import type { Bet, BonusState, BonusMultiplier } from "../../../shared/types/game.js";
 import { GAME_CONFIG } from "../config/gameConfig.js";
 import { buildGrid, evaluatePaylines, evaluateScatter, normalizeBet } from "../math/paylines.js";
-import { triggerFreeSpins } from "../bonus/freeSpins.js";
+import { retriggerFreeSpins, triggerFreeSpins } from "../bonus/freeSpins.js";
+import { createBonusWheelEngine } from "../bonus/bonusWheel.js";
 import { createDeterministicRng } from "../rng/deterministicRng.js";
 
 export function runSimulation(request: SimulateRequest): SimulateResponse {
   const spins = clampSpinCount(request.spins);
   const bet = normalizeBet(request.bet ?? { coinValue: 5, betLevel: 2 }, GAME_CONFIG);
+  const wheelEngine = createBonusWheelEngine(GAME_CONFIG.bonusWheel);
   let totalBet = 0;
   let totalWin = 0;
+  let baseWin = 0;
+  let bonusFinalWin = 0;
   let hitCount = 0;
   let bonusCount = 0;
   let maxObservedWinX = 0;
   let bonus: BonusState | null = null;
   const distribution: Record<string, number> = {};
+  const wheelDistribution = emptyWheelDistribution();
   const returns: number[] = [];
 
   for (let i = 0; i < spins; i++) {
@@ -28,42 +33,100 @@ export function runSimulation(request: SimulateRequest): SimulateResponse {
     const reelStops = GAME_CONFIG.reelsStrips.map((strip) => Math.floor(rng.next() * strip.length));
     const grid = buildGrid(GAME_CONFIG.reelsStrips, reelStops, GAME_CONFIG.rows);
     const activeBet: Bet = isFreeSpin ? bonus!.originalBet : bet;
-    const multiplier = bonus?.currentMultiplier ?? 1;
     const lines = evaluatePaylines(GAME_CONFIG, grid, activeBet);
     const scatter = evaluateScatter(GAME_CONFIG, grid, activeBet);
-    const freeSpins = triggerFreeSpins(scatter.count, GAME_CONFIG);
-    const win = Math.min(Math.round((lines.totalWin + scatter.win) * multiplier), activeBet.totalBet * GAME_CONFIG.targets.maxWinX);
+    const freeSpins = isFreeSpin
+      ? retriggerFreeSpins(scatter.count, GAME_CONFIG)
+      : triggerFreeSpins(scatter.count, GAME_CONFIG);
+    const scale = isFreeSpin ? GAME_CONFIG.bonusWheel.rawWinScale : 1;
+    const wheelMultiplier = isFreeSpin ? bonus!.wheelMultiplier : 1;
+    let win = Math.min(
+      Math.round((lines.totalWin + scatter.win) * scale * wheelMultiplier),
+      activeBet.totalBet * GAME_CONFIG.targets.maxWinX
+    );
 
-    if (!isFreeSpin) totalBet += activeBet.totalBet;
-    totalWin += win;
+    if (!isFreeSpin) {
+      totalBet += activeBet.totalBet;
+      totalWin += win;
+      baseWin += win;
+    }
     if (win > 0) hitCount++;
-    if (freeSpins.triggered) bonusCount++;
-    maxObservedWinX = Math.max(maxObservedWinX, win / activeBet.totalBet);
-    returns.push(win / activeBet.totalBet);
-    distribution[bucketWin(win / activeBet.totalBet)] = (distribution[bucketWin(win / activeBet.totalBet)] ?? 0) + 1;
+    if (!isFreeSpin && freeSpins.triggered) bonusCount++;
+    let creditedWin = win;
 
     if (freeSpins.triggered || isFreeSpin) {
-      bonus = bonus ?? { remaining: 0, awarded: 0, currentMultiplier: 1, totalBonusWin: 0, originalBet: activeBet };
+      if (!bonus) {
+        const wheelRng = createDeterministicRng({
+          serverSeed: request.seed ?? "simulation-seed",
+          nonce: `sim-wheel-${i}`,
+          roundId: `sim-round-${i}`,
+          spinIndex: i
+        });
+        const wheelResult = wheelEngine.select(wheelRng.next());
+        wheelDistribution[wheelResult.label] += 1;
+        bonus = {
+          remaining: 0,
+          awarded: 0,
+          currentMultiplier: GAME_CONFIG.freeSpins.startMultiplier,
+          totalBonusWin: 0,
+          originalBet: activeBet,
+          wheelResult,
+          wheelMultiplier: wheelResult.multiplier,
+          bonusWinRaw: 0,
+          bonusWinFinal: 0
+        };
+      }
       bonus.remaining += freeSpins.awarded;
       bonus.awarded += freeSpins.awarded;
       if (isFreeSpin) {
         bonus.remaining = Math.max(0, bonus.remaining - 1);
-        bonus.totalBonusWin += win;
-        if (win > 0) bonus.currentMultiplier = Math.min(GAME_CONFIG.freeSpins.maxMultiplier, bonus.currentMultiplier + 1);
+        bonus.bonusWinRaw += Math.round(win / bonus.wheelMultiplier);
+        bonus.totalBonusWin = bonus.bonusWinRaw;
+        bonus.bonusWinFinal += win;
+        totalWin += win;
+        bonusFinalWin += win;
+        if (bonus.remaining <= 0) {
+          bonus = null;
+        }
       }
-      if (bonus.remaining <= 0) bonus = null;
     }
+
+    maxObservedWinX = Math.max(maxObservedWinX, creditedWin / activeBet.totalBet);
+    returns.push(creditedWin / activeBet.totalBet);
+    distribution[bucketWin(creditedWin / activeBet.totalBet)] = (distribution[bucketWin(creditedWin / activeBet.totalBet)] ?? 0) + 1;
   }
 
+  const totalWheelHits = Object.values(wheelDistribution).reduce((sum, count) => sum + count, 0);
   return {
     spins,
     baseSpins: Math.max(1, totalBet / bet.totalBet),
     rtp: totalWin / Math.max(1, totalBet),
+    baseRTP: baseWin / Math.max(1, totalBet),
+    bonusRTP: bonusFinalWin / Math.max(1, totalBet),
+    finalRTP: totalWin / Math.max(1, totalBet),
     hitFrequency: hitCount / spins,
     bonusFrequency: bonusCount / spins,
+    wheelDistribution: Object.fromEntries(
+      Object.entries(wheelDistribution).map(([label, count]) => [label, count / Math.max(1, totalWheelHits)])
+    ) as Record<`x${BonusMultiplier}`, number>,
+    averageMultiplier: wheelEngine.averageMultiplier(),
     maxObservedWinX,
     volatilityIndex: standardDeviation(returns),
     distribution
+  };
+}
+
+function emptyWheelDistribution(): Record<`x${BonusMultiplier}`, number> {
+  return {
+    x2: 0,
+    x3: 0,
+    x4: 0,
+    x5: 0,
+    x6: 0,
+    x7: 0,
+    x8: 0,
+    x9: 0,
+    x10: 0
   };
 }
 

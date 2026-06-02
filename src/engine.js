@@ -239,7 +239,7 @@ export function generateSpinResult(ctx) {
   const multiplier = ctx.bonusState?.currentMultiplier ?? 1;
   const lineResult = evaluatePaylines(screen, ctx.config.paylines, ctx.bet.lineBet, ctx.config.paytable, ctx.config.paytableScale);
   const scatter = evaluateScatter(screen, ctx.bet.totalBet, ctx.config.scatterPaytable);
-  // Progressive multiplier applies in free-spin context.
+  // Free-spin wins are multiplied by the backend Bonus Wheel in the HTTP engine.
   const preMultiplierWin = lineResult.totalWin + scatter.win;
   const uncappedWin = Math.round(preMultiplierWin * multiplier);
   const maxWin = ctx.bet.totalBet * (ctx.config.targets?.maxWinX ?? Number.POSITIVE_INFINITY);
@@ -312,7 +312,7 @@ export function triggerFreeSpins(scatterCount, freeSpinsConfig) {
 }
 
 export function advanceBonus(existing, result, bet, config = GAME_CONFIG) {
-  // Handles both bonus trigger and per-free-spin progression.
+  // Handles both bonus trigger and per-free-spin state.
   let bonus = existing;
   if (result.freeSpins.triggered) {
     bonus = bonus || {
@@ -328,9 +328,6 @@ export function advanceBonus(existing, result, bet, config = GAME_CONFIG) {
   if (bonus && existing) {
     bonus.remaining = Math.max(0, bonus.remaining - 1);
     bonus.totalBonusWin += result.totalWin;
-    if (result.totalWin > 0) {
-      bonus.currentMultiplier = Math.min(config.freeSpins.maxMultiplier, bonus.currentMultiplier + config.freeSpins.stepOnWin);
-    }
   }
   return bonus && bonus.remaining > 0 ? bonus : null;
 }
