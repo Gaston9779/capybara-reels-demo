@@ -15,6 +15,7 @@ export type SymbolId =
 
 export type GameMode = "BASE" | "FREE_SPIN";
 export type RoundState = "RESULT_READY" | "BONUS_TRIGGERED" | "ROLLED_BACK";
+export type BonusMultiplier = 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
 // Money is represented in cents to avoid floating point rounding issues.
 export type MoneyCents = number;
@@ -57,6 +58,23 @@ export interface FreeSpinTrigger {
   awarded: number;
 }
 
+export interface BonusWheelConfig {
+  segments: Array<{ multiplier: BonusMultiplier; weight: number }>;
+  rawWinScale: number;
+}
+
+export interface BonusRetriggerConfig {
+  twoScatterAward: number;
+  threePlusScatterAward: number;
+}
+
+export interface WheelResult {
+  label: `x${BonusMultiplier}`;
+  multiplier: BonusMultiplier;
+  weight: number;
+  probability: number;
+}
+
 // Running state of the free spins feature attached to the session.
 export interface BonusState {
   remaining: number;
@@ -64,6 +82,10 @@ export interface BonusState {
   currentMultiplier: number;
   totalBonusWin: MoneyCents;
   originalBet: Bet;
+  wheelResult: WheelResult;
+  wheelMultiplier: BonusMultiplier;
+  bonusWinRaw: MoneyCents;
+  bonusWinFinal: MoneyCents;
 }
 
 // Full math outcome before UI animation/presentation.
@@ -75,6 +97,10 @@ export interface SpinResult {
   multiplier: number;
   freeSpins: FreeSpinTrigger;
   totalWin: MoneyCents;
+  wheelResult?: WheelResult | null;
+  wheelMultiplier?: BonusMultiplier | null;
+  bonusWinRaw?: MoneyCents;
+  bonusWinFinal?: MoneyCents;
 }
 
 // Persisted and audit-friendly representation of a spin round.
@@ -93,6 +119,10 @@ export interface RoundRecord {
   multiplier: number;
   totalWin: MoneyCents;
   bonusTriggered: boolean;
+  wheelResult?: WheelResult | null;
+  wheelMultiplier?: BonusMultiplier | null;
+  bonusWinRaw: MoneyCents;
+  bonusWinFinal: MoneyCents;
   freeSpinsRemaining: number;
   mathVersion: string;
   configVersion: string;

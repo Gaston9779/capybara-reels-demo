@@ -1,4 +1,4 @@
-import type { Bet, FreeSpinTrigger, Grid, LineWin, MoneyCents, RoundRecord, ScatterResult, SessionState } from "../types/game.js";
+import type { Bet, BonusMultiplier, FreeSpinTrigger, Grid, LineWin, MoneyCents, RoundRecord, ScatterResult, SessionState } from "../types/game.js";
 
 // /init request payload: enough to open a demo session with locale/currency context.
 export interface InitRequest {
@@ -31,7 +31,7 @@ export interface SpinRequest {
   bet: Pick<Bet, "coinValue" | "betLevel">;
 }
 
-// /buy-bonus request: demo feature buy, cost is calculated server-side as 30x totalBet.
+// /buy-bonus request: demo feature buy, cost is calculated server-side from math config.
 export interface BuyBonusRequest {
   sessionId: string;
   idempotencyKey: string;
@@ -80,6 +80,11 @@ export interface SimulateResponse {
   rtp: number;
   hitFrequency: number;
   bonusFrequency: number;
+  wheelDistribution: Record<`x${BonusMultiplier}`, number>;
+  averageMultiplier: number;
+  baseRTP: number;
+  bonusRTP: number;
+  finalRTP: number;
   maxObservedWinX: number;
   volatilityIndex: number;
   distribution: Record<string, number>;
